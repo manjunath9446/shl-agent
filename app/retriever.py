@@ -2,14 +2,10 @@
 # app/retriever.py
 # ==========================================
 
-# Retrieval layer for SHL assessment catalog
-# Uses ChromaDB + SentenceTransformer embeddings
+# Lightweight retrieval layer
+# optimized for stable deployment
 
 import chromadb
-
-from chromadb.utils import (
-    embedding_functions
-)
 
 from app.query_expansion import (
     expand_query_with_llm
@@ -21,7 +17,7 @@ from app.query_expansion import (
 # ==========================================
 
 # Persistent vector database
-# for SHL assessment retrieval
+# for SHL assessment catalog
 
 client = chromadb.PersistentClient(
     path="./chroma_db",
@@ -32,69 +28,26 @@ client = chromadb.PersistentClient(
 
 
 # ==========================================
-# EMBEDDING MODEL
+# LIGHTWEIGHT COLLECTION SETUP
 # ==========================================
 
-# Lightweight embedding model
-# optimized for semantic retrieval
+# Avoids heavy SentenceTransformer
+# loading during Render startup
 
-embedding_function = (
-    embedding_functions
-    .SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
-    )
+collection = client.get_or_create_collection(
+    name="shl_assessments"
 )
 
-
-# ==========================================
-# COLLECTION LOADING
-# ==========================================
-
-# Loads existing collection
-# or creates a new one if missing
-
-try:
-
-    collection = client.get_collection(
-
-        name="shl_assessments",
-
-        embedding_function=embedding_function
-    )
-
-    print(
-        "\nLoaded existing "
-        "ChromaDB collection"
-    )
-
-except Exception as e:
-
-    print(
-        "\nCollection not found."
-    )
-
-    print(
-        "Creating new collection..."
-    )
-
-    collection = client.create_collection(
-
-        name="shl_assessments",
-
-        embedding_function=embedding_function
-    )
-
-    print(
-        "\nNew ChromaDB collection "
-        "created successfully"
-    )
+print(
+    "\nChromaDB collection ready"
+)
 
 
 # ==========================================
 # GET COLLECTION
 # ==========================================
 
-# Returns active ChromaDB collection
+# Returns active collection
 
 def get_collection():
 
@@ -106,7 +59,7 @@ def get_collection():
 # ==========================================
 
 # Converts raw ChromaDB output
-# into structured recommendation format
+# into structured response format
 
 def format_results(results):
 
@@ -155,11 +108,40 @@ def format_results(results):
 
 
 # ==========================================
+# FALLBACK KEYWORD RETRIEVAL
+# ==========================================
+
+# Lightweight retrieval fallback
+# for deployment-safe querying
+
+def keyword_match_score(
+    query,
+    text
+):
+
+    query_words = (
+        query.lower().split()
+    )
+
+    text_lower = text.lower()
+
+    score = 0
+
+    for word in query_words:
+
+        if word in text_lower:
+
+            score += 1
+
+    return score
+
+
+# ==========================================
 # RAW QUERY RETRIEVAL
 # ==========================================
 
 # Direct retrieval without
-# query expansion
+# semantic expansion
 
 def retrieve_raw_query(
 
@@ -170,14 +152,71 @@ def retrieve_raw_query(
 
     try:
 
-        results = collection.query(
+        results = collection.get()
 
-            query_texts=[query],
-
-            n_results=n_results
+        metadatas = results.get(
+            "metadatas",
+            []
         )
 
-        return format_results(results)
+        documents = results.get(
+            "documents",
+            []
+        )
+
+        ranked = []
+
+        for idx, item in enumerate(
+            metadatas
+        ):
+
+            description = (
+                documents[idx]
+                if idx < len(documents)
+                else ""
+            )
+
+            combined_text = (
+                f"{item.get('name', '')} "
+                f"{description}"
+            )
+
+            score = keyword_match_score(
+                query,
+                combined_text
+            )
+
+            ranked.append({
+
+                "name":
+                    item.get("name", ""),
+
+                "url":
+                    item.get("url", ""),
+
+                "test_type":
+                    item.get(
+                        "test_type",
+                        "Unknown"
+                    ),
+
+                "description":
+                    description,
+
+                "score":
+                    score
+            })
+
+        ranked = sorted(
+
+            ranked,
+
+            key=lambda x: x["score"],
+
+            reverse=True
+        )
+
+        return ranked[:n_results]
 
     except Exception as e:
 
@@ -194,8 +233,8 @@ def retrieve_raw_query(
 # MAIN RETRIEVAL PIPELINE
 # ==========================================
 
-# Expands hiring intent and
-# retrieves broader candidate pool
+# Expands recruiter intent
+# and retrieves ranked candidates
 
 def retrieve_assessments(
 
@@ -210,8 +249,8 @@ def retrieve_assessments(
         # QUERY EXPANSION
         # ==================================
 
-        # Expands recruiter intent
-        # for stronger Recall@10
+        # Expands hiring context
+        # for stronger retrieval coverage
 
         expanded_query = (
             expand_query_with_llm(query)
@@ -230,32 +269,23 @@ def retrieve_assessments(
         )
 
         # ==================================
-        # VECTOR RETRIEVAL
+        # FALLBACK RETRIEVAL
         # ==================================
 
-        # Broad semantic retrieval
-        # before recommendation filtering
+        results = retrieve_raw_query(
 
-        results = collection.query(
-
-            query_texts=[
-                expanded_query
-            ],
+            expanded_query,
 
             n_results=n_results
         )
 
-        formatted = (
-            format_results(results)
-        )
-
         print(
             f"\nRetrieved "
-            f"{len(formatted)} "
+            f"{len(results)} "
             f"candidate assessments"
         )
 
-        return formatted
+        return results
 
     except Exception as e:
 
@@ -284,14 +314,12 @@ def retrieve_for_comparison(
 
     try:
 
-        results = collection.query(
+        return retrieve_raw_query(
 
-            query_texts=[query],
+            query,
 
             n_results=n_results
         )
-
-        return format_results(results)
 
     except Exception as e:
 
@@ -309,7 +337,7 @@ def retrieve_for_comparison(
 # ==========================================
 
 # Utility helper for deployment
-# and health verification
+# health verification
 
 def collection_exists():
 
