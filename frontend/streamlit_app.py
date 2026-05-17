@@ -1,14 +1,21 @@
-# ==========================================
-# frontend/streamlit_app.py
-# ==========================================
-
 import streamlit as st
 import requests
 
 
 # ==========================================
-# BACKEND API
+# CONFIG
 # ==========================================
+
+st.set_page_config(
+
+    page_title=
+        "SHL Assessment Agent",
+
+    page_icon="🎯",
+
+    layout="wide"
+)
+
 
 API_URL = (
     "https://manjunath3035-shl-backend.hf.space/chat"
@@ -16,60 +23,21 @@ API_URL = (
 
 
 # ==========================================
-# PAGE CONFIG
-# ==========================================
-
-st.set_page_config(
-
-    page_title=(
-        "SHL Assessment "
-        "Recommendation Agent"
-    ),
-
-    layout="wide"
-)
-
-
-# ==========================================
-# CUSTOM STYLING
-# ==========================================
-
-st.markdown("""
-
-<style>
-
-.main {
-    background-color: #0b1020;
-    color: white;
-}
-
-.stChatMessage {
-    border-radius: 10px;
-    padding: 10px;
-}
-
-</style>
-
-""", unsafe_allow_html=True)
-
-
-# ==========================================
-# HEADER
+# TITLE
 # ==========================================
 
 st.title(
-    "🎯 SHL Assessment "
-    "Recommendation Agent"
+    "🎯 SHL Assessment Recommendation Agent"
 )
 
 st.caption(
-    "Powered by RAG + Conversational AI "
-    "| Individual Test Solutions Catalog"
+    "Powered by RAG + Conversational AI | "
+    "Individual Test Solutions Catalog"
 )
 
 
 # ==========================================
-# SESSION STATE
+# SESSION
 # ==========================================
 
 if "messages" not in st.session_state:
@@ -78,59 +46,59 @@ if "messages" not in st.session_state:
 
 
 # ==========================================
-# DISPLAY CHAT HISTORY
+# DISPLAY CHAT
 # ==========================================
 
-for msg in st.session_state.messages:
+for message in st.session_state.messages:
 
     with st.chat_message(
-        msg["role"]
+        message["role"]
     ):
 
         st.markdown(
-            msg["content"]
+            message["content"]
         )
 
 
 # ==========================================
-# USER INPUT
+# INPUT
 # ==========================================
 
-user_input = st.chat_input(
-    "Describe the role you're hiring for..."
+prompt = st.chat_input(
+    "Describe the role "
+    "you're hiring for..."
 )
 
 
-# ==========================================
-# HANDLE USER MESSAGE
-# ==========================================
+if prompt:
 
-if user_input:
+    st.session_state.messages.append(
 
-    # ======================================
-    # STORE USER MESSAGE
-    # ======================================
+        {
 
-    st.session_state.messages.append({
+            "role":
+                "user",
 
-        "role": "user",
+            "content":
+                prompt
+        }
+    )
 
-        "content": user_input
-    })
-
-    # ======================================
-    # DISPLAY USER MESSAGE
-    # ======================================
 
     with st.chat_message(
         "user"
     ):
 
-        st.markdown(user_input)
+        st.markdown(prompt)
 
-    # ======================================
-    # API REQUEST
-    # ======================================
+
+    payload = {
+
+        "messages":
+
+            st.session_state.messages
+    }
+
 
     try:
 
@@ -138,160 +106,122 @@ if user_input:
 
             API_URL,
 
-            json={
+            json=payload,
 
-                "messages":
-                    st.session_state.messages
-            },
-
-            timeout=60
+            timeout=120
         )
 
-        # ==================================
-        # DEBUG INFO
-        # ==================================
 
-        st.write(
-            "Status Code:",
-            response.status_code
+        data = response.json()
+
+
+        reply = data.get(
+            "reply",
+            ""
         )
 
-        st.write(
-            "Raw Response:"
+
+        recommendations = data.get(
+
+            "recommendations",
+
+            []
         )
 
-        st.code(
-            response.text
-        )
 
-        # ==================================
-        # HANDLE BACKEND ERRORS
-        # ==================================
+        with st.chat_message(
+            "assistant"
+        ):
 
-        if response.status_code != 200:
+            st.markdown(reply)
 
-            st.error(
 
-                f"Backend Error:\n"
-                f"{response.text}"
-            )
+            if recommendations:
 
-        else:
-
-            # ==============================
-            # PARSE RESPONSE
-            # ==============================
-
-            data = response.json()
-
-            assistant_reply = (
-                data.get(
-                    "reply",
-                    "No response"
-                )
-            )
-
-            recommendations = (
-                data.get(
-                    "recommendations",
-                    []
-                )
-            )
-
-            # ==============================
-            # STORE ASSISTANT MESSAGE
-            # ==============================
-
-            st.session_state.messages.append({
-
-                "role": "assistant",
-
-                "content": assistant_reply
-            })
-
-            # ==============================
-            # DISPLAY ASSISTANT MESSAGE
-            # ==============================
-
-            with st.chat_message(
-                "assistant"
-            ):
-
-                st.markdown(
-                    assistant_reply
+                st.subheader(
+                    "📋 Recommended "
+                    "Assessments"
                 )
 
-                # ==========================
-                # RECOMMENDATIONS
-                # ==========================
 
-                if recommendations:
+                for rec in recommendations:
 
                     st.markdown(
-                        "---"
+
+                        f"### "
+                        f"{rec['name']}"
                     )
 
-                    st.subheader(
-                        "📋 Recommended "
-                        "Assessments"
+
+                    st.write(
+
+                        "Type:",
+
+                        rec.get(
+
+                            "test_type",
+
+                            "Assessment"
+                        )
                     )
 
-                    for rec in recommendations:
 
-                        with st.container():
+                    url = (
 
-                            st.markdown(
+                        rec.get(
+                            "url"
+                        )
 
-                                f"### "
-                                f"{rec.get('name', '')}"
-                            )
+                        or
 
-                            st.write(
+                        rec.get(
+                            "link"
+                        )
 
-                                f"Type: "
-                                f"{rec.get('test_type', '')}"
-                            )
+                        or
 
-                            st.write(
+                        rec.get(
+                            "product_url"
+                        )
+                    )
 
-                                rec.get(
-                                    "description",
-                                    ""
-                                )
-                            )
 
-                            url = rec.get(
-                                "url",
-                                ""
-                            )
+                    if url:
 
-                            if url:
+                        st.markdown(
 
-                                st.markdown(
+                            f"[Open Assessment]"
+                            f"({url})"
+                        )
 
-                                    f"[Open Assessment]"
-                                    f"({url})"
-                                )
-
-                            st.markdown("---")
-
-            # ==============================
-            # END OF CONVERSATION
-            # ==============================
 
             if data.get(
-                "end_of_conversation",
-                False
+                "end_of_conversation"
             ):
 
                 st.success(
-
-                    "✅ Conversation complete!"
+                    "✅ Conversation "
+                    "complete!"
                 )
+
+
+        st.session_state.messages.append(
+
+            {
+
+                "role":
+                    "assistant",
+
+                "content":
+                    reply
+            }
+        )
+
 
     except Exception as e:
 
         st.error(
 
-            f"API Error: {str(e)}"
+            f"Backend Error: "
+            f"{str(e)}"
         )
