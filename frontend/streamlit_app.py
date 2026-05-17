@@ -179,10 +179,26 @@ if user_input:
         else:
 
             # ==============================
-            # PARSE RESPONSE
+            # SAFE JSON PARSING
             # ==============================
 
-            data = response.json()
+            try:
+
+                data = response.json()
+
+            except Exception as json_error:
+
+                st.error(
+
+                    f"JSON Parse Error:\n"
+                    f"{str(json_error)}"
+                )
+
+                st.stop()
+
+            # ==============================
+            # EXTRACT RESPONSE
+            # ==============================
 
             assistant_reply = (
                 data.get(
