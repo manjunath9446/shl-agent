@@ -21,7 +21,7 @@ from app.query_expansion import (
 # from local JSON file
 
 CATALOG_PATH = (
-    "data/shl_catalog.json"
+    "data/shl_product_catalog.json"
 )
 
 assessment_catalog = []
