@@ -1,4 +1,9 @@
+# ==========================================
 # app/retriever.py
+# ==========================================
+
+# Retrieval layer for SHL assessment catalog
+# Uses ChromaDB + SentenceTransformer embeddings
 
 import chromadb
 
@@ -10,122 +15,98 @@ from app.query_expansion import (
     expand_query_with_llm
 )
 
+
 # ==========================================
 # CHROMADB CLIENT
 # ==========================================
 
+# Persistent vector database
+# for SHL assessment retrieval
+
 client = chromadb.PersistentClient(
-
     path="./chroma_db",
-
     settings=chromadb.Settings(
         anonymized_telemetry=False
     )
 )
 
-embedding_function = (
 
+# ==========================================
+# EMBEDDING MODEL
+# ==========================================
+
+# Lightweight embedding model
+# optimized for semantic retrieval
+
+embedding_function = (
     embedding_functions
     .SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2"
     )
 )
 
-collection = client.get_collection(
 
-    name="shl_assessments",
+# ==========================================
+# COLLECTION LOADING
+# ==========================================
 
-    embedding_function=embedding_function
-)
+# Loads existing collection
+# or creates a new one if missing
+
+try:
+
+    collection = client.get_collection(
+
+        name="shl_assessments",
+
+        embedding_function=embedding_function
+    )
+
+    print(
+        "\nLoaded existing "
+        "ChromaDB collection"
+    )
+
+except Exception as e:
+
+    print(
+        "\nCollection not found."
+    )
+
+    print(
+        "Creating new collection..."
+    )
+
+    collection = client.create_collection(
+
+        name="shl_assessments",
+
+        embedding_function=embedding_function
+    )
+
+    print(
+        "\nNew ChromaDB collection "
+        "created successfully"
+    )
+
 
 # ==========================================
 # GET COLLECTION
 # ==========================================
 
+# Returns active ChromaDB collection
+
 def get_collection():
 
     return collection
 
-# ==========================================
-# DOMAIN KEYWORD EXTRACTION
-# ==========================================
-
-def extract_domain_keywords(query):
-
-    query_lower = query.lower()
-
-    keywords = []
-
-    important_terms = [
-
-        "java",
-        "python",
-        "rust",
-        "golang",
-        "linux",
-        "network",
-        "networking",
-        "cloud",
-        "aws",
-        "azure",
-        "frontend",
-        "backend",
-        "full stack",
-        "leadership",
-        "executive",
-        "manager",
-        "sales",
-        "support",
-        "embedded",
-        "vlsi",
-        "devops",
-        "ai",
-        "machine learning",
-        "data science",
-        "security",
-        "cybersecurity"
-    ]
-
-    for term in important_terms:
-
-        if term in query_lower:
-
-            keywords.append(term)
-
-    return keywords
-
-# ==========================================
-# KEYWORD ALIGNMENT SCORE
-# ==========================================
-
-def keyword_alignment_score(
-
-    assessment,
-
-    keywords
-):
-
-    text = (
-
-        assessment["name"]
-        + " "
-        + assessment["description"]
-
-    ).lower()
-
-    score = 0
-
-    for keyword in keywords:
-
-        if keyword in text:
-
-            score += 1
-
-    return score
 
 # ==========================================
 # FORMAT RESULTS
 # ==========================================
+
+# Converts raw ChromaDB output
+# into structured recommendation format
 
 def format_results(results):
 
@@ -172,190 +153,127 @@ def format_results(results):
 
     return formatted_results
 
+
 # ==========================================
-# REMOVE IRRELEVANT RESULTS
+# RAW QUERY RETRIEVAL
 # ==========================================
 
-def filter_irrelevant_results(
+# Direct retrieval without
+# query expansion
+
+def retrieve_raw_query(
 
     query,
 
-    results
+    n_results=10
 ):
 
-    query_lower = query.lower()
+    try:
 
-    filtered = []
+        results = collection.query(
 
-    # ======================================
-    # RUST FILTERING
-    # ======================================
+            query_texts=[query],
 
-    if "rust" in query_lower:
-
-        blocked_terms = [
-
-            "java",
-            "c#",
-            "jee",
-            "spring"
-        ]
-
-        for r in results:
-
-            text = (
-                r["name"] + " " +
-                r["description"]
-            ).lower()
-
-            blocked = False
-
-            for term in blocked_terms:
-
-                if term in text:
-
-                    blocked = True
-                    break
-
-            if not blocked:
-
-                filtered.append(r)
-
-        return filtered
-
-    return results
-
-# ==========================================
-# RERANK RESULTS
-# ==========================================
-
-def rerank_results(
-
-    query,
-
-    results
-):
-
-    keywords = extract_domain_keywords(
-        query
-    )
-
-    reranked = []
-
-    for result in results:
-
-        semantic_score = (
-            1 / (
-                result["score"] + 0.0001
-            )
+            n_results=n_results
         )
 
-        keyword_score = (
-            keyword_alignment_score(
-                result,
-                keywords
-            )
+        return format_results(results)
+
+    except Exception as e:
+
+        print(
+            "\nRAW QUERY ERROR:"
         )
 
-        final_score = (
+        print(str(e))
 
-            semantic_score * 0.7
+        return []
 
-            +
-
-            keyword_score * 0.3
-        )
-
-        result["final_score"] = final_score
-
-        reranked.append(result)
-
-    reranked.sort(
-
-        key=lambda x: x["final_score"],
-
-        reverse=True
-    )
-
-    return reranked
 
 # ==========================================
-# MAIN RETRIEVAL
+# MAIN RETRIEVAL PIPELINE
 # ==========================================
+
+# Expands hiring intent and
+# retrieves broader candidate pool
 
 def retrieve_assessments(
 
     query,
 
-    n_results=12
+    n_results=15
 ):
 
-    # ======================================
-    # QUERY EXPANSION
-    # ======================================
+    try:
 
-    expanded_query = (
-        expand_query_with_llm(query)
-    )
+        # ==================================
+        # QUERY EXPANSION
+        # ==================================
 
-    print("\n=== QUERY EXPANSION ===")
+        # Expands recruiter intent
+        # for stronger Recall@10
 
-    print("ORIGINAL:", query)
-
-    print("EXPANDED:", expanded_query)
-
-    # ======================================
-    # RETRIEVAL
-    # ======================================
-
-    results = collection.query(
-
-        query_texts=[expanded_query],
-
-        n_results=n_results
-    )
-
-    formatted = format_results(
-        results
-    )
-
-    # ======================================
-    # FILTERING
-    # ======================================
-
-    filtered = filter_irrelevant_results(
-
-        query,
-
-        formatted
-    )
-
-    # ======================================
-    # RERANKING
-    # ======================================
-
-    reranked = rerank_results(
-
-        query,
-
-        filtered
-    )
-
-    print("\n=== FINAL RANKED RESULTS ===")
-
-    for r in reranked[:5]:
-
-        print(
-            r["name"],
-            " | SCORE:",
-            r["final_score"]
+        expanded_query = (
+            expand_query_with_llm(query)
         )
 
+        print("\n=== QUERY EXPANSION ===")
+
+        print(
+            "ORIGINAL:",
+            query
+        )
+
+        print(
+            "EXPANDED:",
+            expanded_query
+        )
+
+        # ==================================
+        # VECTOR RETRIEVAL
+        # ==================================
+
+        # Broad semantic retrieval
+        # before recommendation filtering
+
+        results = collection.query(
+
+            query_texts=[
+                expanded_query
+            ],
+
+            n_results=n_results
+        )
+
+        formatted = (
+            format_results(results)
+        )
+
+        print(
+            f"\nRetrieved "
+            f"{len(formatted)} "
+            f"candidate assessments"
+        )
+
+        return formatted
+
+    except Exception as e:
+
+        print(
+            "\nRETRIEVAL ERROR:"
+        )
+
+        print(str(e))
+
+        return []
 
 
-    return reranked[:5]
-
+# ==========================================
 # COMPARISON RETRIEVAL
+# ==========================================
+
+# Retrieves assessments for
+# side-by-side comparison workflows
 
 def retrieve_for_comparison(
 
@@ -364,29 +282,43 @@ def retrieve_for_comparison(
     n_results=10
 ):
 
-    results = collection.query(
+    try:
 
-        query_texts=[query],
+        results = collection.query(
 
-        n_results=n_results
-    )
+            query_texts=[query],
 
-    return format_results(results)
-# RAW QUERY RETRIEVAL
+            n_results=n_results
+        )
+
+        return format_results(results)
+
+    except Exception as e:
+
+        print(
+            "\nCOMPARISON ERROR:"
+        )
+
+        print(str(e))
+
+        return []
 
 
-def retrieve_raw_query(
+# ==========================================
+# COLLECTION STATUS
+# ==========================================
 
-    query,
+# Utility helper for deployment
+# and health verification
 
-    n_results=5
-):
+def collection_exists():
 
-    results = collection.query(
+    try:
 
-        query_texts=[query],
+        count = collection.count()
 
-        n_results=n_results
-    )
+        return count >= 0
 
-    return format_results(results)
+    except:
+
+        return False
