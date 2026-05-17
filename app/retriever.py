@@ -2,10 +2,11 @@
 # app/retriever.py
 # ==========================================
 
-# Lightweight retrieval layer
-# optimized for stable deployment
+# Lightweight JSON-based retrieval layer
+# optimized for stable cloud deployment
 
-import chromadb
+import json
+import os
 
 from app.query_expansion import (
     expand_query_with_llm
@@ -13,114 +14,99 @@ from app.query_expansion import (
 
 
 # ==========================================
-# CHROMADB CLIENT
+# LOAD ASSESSMENT CATALOG
 # ==========================================
 
-# Persistent vector database
-# for SHL assessment catalog
+# Loads SHL assessment catalog
+# from local JSON file
 
-client = chromadb.PersistentClient(
-    path="./chroma_db",
-    settings=chromadb.Settings(
-        anonymized_telemetry=False
+CATALOG_PATH = (
+    "data/shl_catalog.json"
+)
+
+assessment_catalog = []
+
+
+def load_catalog():
+
+    global assessment_catalog
+
+    if not os.path.exists(
+        CATALOG_PATH
+    ):
+
+        print(
+            "\nCatalog file not found"
+        )
+
+        assessment_catalog = []
+
+        return
+
+    with open(
+
+        CATALOG_PATH,
+
+        "r",
+
+        encoding="utf-8"
+
+    ) as f:
+
+        assessment_catalog = (
+            json.load(f)
+        )
+
+    print(
+        f"\nLoaded "
+        f"{len(assessment_catalog)} "
+        f"assessments from catalog"
     )
-)
 
 
-# ==========================================
-# LIGHTWEIGHT COLLECTION SETUP
-# ==========================================
+# Load catalog during startup
 
-# Avoids heavy SentenceTransformer
-# loading during Render startup
-
-collection = client.get_or_create_collection(
-    name="shl_assessments"
-)
-
-print(
-    "\nChromaDB collection ready"
-)
+load_catalog()
 
 
 # ==========================================
 # GET COLLECTION
 # ==========================================
 
-# Returns active collection
+# Compatibility helper for API
 
 def get_collection():
 
-    return collection
+    class DummyCollection:
+
+        def count(self):
+
+            return len(
+                assessment_catalog
+            )
+
+    return DummyCollection()
 
 
 # ==========================================
-# FORMAT RESULTS
+# KEYWORD MATCH SCORE
 # ==========================================
 
-# Converts raw ChromaDB output
-# into structured response format
-
-def format_results(results):
-
-    formatted_results = []
-
-    metadatas = (
-        results.get("metadatas", [[]])[0]
-    )
-
-    documents = (
-        results.get("documents", [[]])[0]
-    )
-
-    distances = (
-        results.get("distances", [[]])[0]
-    )
-
-    for idx, item in enumerate(metadatas):
-
-        formatted_results.append({
-
-            "name":
-                item.get("name", ""),
-
-            "url":
-                item.get("url", ""),
-
-            "test_type":
-                item.get(
-                    "test_type",
-                    "Unknown"
-                ),
-
-            "description":
-                documents[idx]
-                if idx < len(documents)
-                else "",
-
-            "score":
-                distances[idx]
-                if idx < len(distances)
-                else 999
-        })
-
-    return formatted_results
-
-
-# ==========================================
-# FALLBACK KEYWORD RETRIEVAL
-# ==========================================
-
-# Lightweight retrieval fallback
-# for deployment-safe querying
+# Lightweight semantic scoring
+# using keyword overlap
 
 def keyword_match_score(
+
     query,
+
     text
 ):
 
     query_words = (
-        query.lower().split()
+
+        query.lower()
+        .replace(",", " ")
+        .split()
     )
 
     text_lower = text.lower()
@@ -137,11 +123,47 @@ def keyword_match_score(
 
 
 # ==========================================
+# FORMAT ASSESSMENT
+# ==========================================
+
+# Standardizes assessment response
+
+def format_assessment(
+    item,
+    score
+):
+
+    return {
+
+        "name":
+            item.get("name", ""),
+
+        "url":
+            item.get("url", ""),
+
+        "test_type":
+            item.get(
+                "test_type",
+                "Unknown"
+            ),
+
+        "description":
+            item.get(
+                "description",
+                ""
+            ),
+
+        "score":
+            score
+    }
+
+
+# ==========================================
 # RAW QUERY RETRIEVAL
 # ==========================================
 
 # Direct retrieval without
-# semantic expansion
+# query expansion
 
 def retrieve_raw_query(
 
@@ -150,83 +172,44 @@ def retrieve_raw_query(
     n_results=10
 ):
 
-    try:
+    ranked = []
 
-        results = collection.get()
+    for item in assessment_catalog:
 
-        metadatas = results.get(
-            "metadatas",
-            []
+        combined_text = (
+
+            f"{item.get('name', '')} "
+
+            f"{item.get('description', '')} "
+
+            f"{item.get('test_type', '')}"
         )
 
-        documents = results.get(
-            "documents",
-            []
+        score = keyword_match_score(
+
+            query,
+
+            combined_text
         )
 
-        ranked = []
+        ranked.append(
 
-        for idx, item in enumerate(
-            metadatas
-        ):
-
-            description = (
-                documents[idx]
-                if idx < len(documents)
-                else ""
+            format_assessment(
+                item,
+                score
             )
-
-            combined_text = (
-                f"{item.get('name', '')} "
-                f"{description}"
-            )
-
-            score = keyword_match_score(
-                query,
-                combined_text
-            )
-
-            ranked.append({
-
-                "name":
-                    item.get("name", ""),
-
-                "url":
-                    item.get("url", ""),
-
-                "test_type":
-                    item.get(
-                        "test_type",
-                        "Unknown"
-                    ),
-
-                "description":
-                    description,
-
-                "score":
-                    score
-            })
-
-        ranked = sorted(
-
-            ranked,
-
-            key=lambda x: x["score"],
-
-            reverse=True
         )
 
-        return ranked[:n_results]
+    ranked = sorted(
 
-    except Exception as e:
+        ranked,
 
-        print(
-            "\nRAW QUERY ERROR:"
-        )
+        key=lambda x: x["score"],
 
-        print(str(e))
+        reverse=True
+    )
 
-        return []
+    return ranked[:n_results]
 
 
 # ==========================================
@@ -234,7 +217,7 @@ def retrieve_raw_query(
 # ==========================================
 
 # Expands recruiter intent
-# and retrieves ranked candidates
+# before retrieval
 
 def retrieve_assessments(
 
@@ -248,9 +231,6 @@ def retrieve_assessments(
         # ==================================
         # QUERY EXPANSION
         # ==================================
-
-        # Expands hiring context
-        # for stronger retrieval coverage
 
         expanded_query = (
             expand_query_with_llm(query)
@@ -269,7 +249,7 @@ def retrieve_assessments(
         )
 
         # ==================================
-        # FALLBACK RETRIEVAL
+        # RETRIEVAL
         # ==================================
 
         results = retrieve_raw_query(
@@ -303,7 +283,7 @@ def retrieve_assessments(
 # ==========================================
 
 # Retrieves assessments for
-# side-by-side comparison workflows
+# comparison workflows
 
 def retrieve_for_comparison(
 
@@ -336,17 +316,10 @@ def retrieve_for_comparison(
 # COLLECTION STATUS
 # ==========================================
 
-# Utility helper for deployment
-# health verification
+# Health check helper
 
 def collection_exists():
 
-    try:
-
-        count = collection.count()
-
-        return count >= 0
-
-    except:
-
-        return False
+    return len(
+        assessment_catalog
+    ) > 0
