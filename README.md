@@ -4,7 +4,7 @@ State-aware conversational AI system for recommending SHL assessments through mu
 
 ---
 
-
+![alt text](image.png)
 
 
 # Project Overview
