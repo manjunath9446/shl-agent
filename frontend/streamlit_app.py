@@ -6,7 +6,7 @@ import pandas as pd
 
 
 
-API_URL = "http://127.0.0.1:8000/chat"
+API_URL = "https://shl-agent-ri7d.onrender.com/chat"
 
 st.set_page_config(
     page_title="SHL Assessment Recommendation Agent",
